@@ -735,6 +735,8 @@ void AsyVkRender::vkrender(VkrenderFunctionArgs const& args)
 void AsyVkRender::initVulkan()
 {
 #ifdef __APPLE__
+  // Increase timeout for Metal command buffers to prevent GPU hangs
+  setenv("MVK_CONFIG_METAL_COMMAND_BUFFER_TIMEOUT", "10", true);
   setenv("MVK_CONFIG_LOG_LEVEL","1",false);
 
   // Use smallest memory footprint during command buffer encoding
@@ -4660,6 +4662,8 @@ void AsyVkRender::renderTransparencyStaged(FrameObject& object, int imageIndex) 
 
         // Render this batch
         drawTransparent(object);
+        // Add a small delay between batches to let the GPU catch up
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
       }
 
       // Restore the original data
@@ -4906,7 +4910,13 @@ void AsyVkRender::drawFrame()
       (void) device->resetFences(1, &*frameObject.inFlightFence);
 
       try {
-        vkutils::checkVkResult(renderQueue.submit(1, &submitInfo, nullptr));
+        // Add a small delay before submission to let the GPU catch up
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        
+        // Submit with a try-catch block
+        renderQueue.submit(1, &submitInfo, nullptr);
+      } catch (const vk::SystemError& e) {
+        cerr << "System error during queue submission: " << e.what() << endl;
       } catch (const vk::OutOfDeviceMemoryError& e) {
         outOfMemory();
       }
