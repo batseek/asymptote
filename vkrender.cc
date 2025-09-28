@@ -4625,15 +4625,23 @@ void AsyVkRender::renderTransparencyStaged(FrameObject& object, int imageIndex) 
   if (!Opaque && transparentData.indices.size() > 0) {
     // Calculate the number of fragments
     size_t fragmentCount = transparentData.indices.size();
-
-    // For very large fragment counts, render in batches
-    size_t maxFragmentsPerBatch = 100000;
-    if (fragmentCount > maxFragmentsPerBatch) {
+    
+    // Determine if we are in the problematic configuration
+    bool isProblematicConfig = View && !fxaa && !GPUcompress;
+    
+    // Use a smaller batch size for problematic configurations
+    size_t maxFragmentsPerBatch = isProblematicConfig ? 25000 : 50000;
+    
+    // For very large fragment counts or problematic configurations, render in batches
+    if (fragmentCount > maxFragmentsPerBatch || isProblematicConfig) {
       size_t batches = (fragmentCount + maxFragmentsPerBatch - 1) / maxFragmentsPerBatch;
 
       if (settings::getSetting<bool>("verbose")) {
         cerr << "Rendering " << fragmentCount << " transparent fragments in "
              << batches << " batches" << endl;
+        if (isProblematicConfig) {
+          cerr << "Using conservative batching for problematic configuration (View=true, fxaa=false, GPUcompress=false)" << endl;
+        }
       }
 
       // Save the original data
@@ -4652,6 +4660,18 @@ void AsyVkRender::renderTransparencyStaged(FrameObject& object, int imageIndex) 
         );
 
         drawTransparent(object);
+        
+        // For problematic configurations, add a small synchronization point between batches
+        // This helps prevent GPU overload on macOS Metal/Vulkan
+        if (isProblematicConfig && batch < batches - 1) {
+          // Flush the current command buffer to ensure work is submitted
+          currentCommandBuffer.flush();
+          
+          // For every 4th batch, wait for GPU to catch up
+          if (batch % 4 == 0 && batch > 0) {
+            device->waitIdle();
+          }
+        }
       }
 
       transparentData.indices = originalIndices;
@@ -4660,7 +4680,6 @@ void AsyVkRender::renderTransparencyStaged(FrameObject& object, int imageIndex) 
     }
   }
 }
-
 void AsyVkRender::postProcessImage(vk::CommandBuffer& cmdBuffer, uint32_t const& frameIndex)
 {
   if (frameIndex >= postProcessDescSet.size() ||
