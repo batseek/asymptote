@@ -4626,14 +4626,22 @@ void AsyVkRender::renderTransparencyStaged(FrameObject& object, int imageIndex) 
     // Calculate the number of fragments
     size_t fragmentCount = transparentData.indices.size();
 
-    // For very large fragment counts, render in batches
-    size_t maxFragmentsPerBatch = 100000;
-    if (fragmentCount > maxFragmentsPerBatch) {
+    // Determine if we are in the problematic configuration
+    bool isProblematicConfig = View && !fxaa && !GPUcompress;
+    
+    // Use a smaller batch size for problematic configurations
+    size_t maxFragmentsPerBatch = isProblematicConfig ? 25000 : 100000;
+    
+    // For very large fragment counts or problematic configurations, render in batches
+    if (fragmentCount > maxFragmentsPerBatch || isProblematicConfig) {
       size_t batches = (fragmentCount + maxFragmentsPerBatch - 1) / maxFragmentsPerBatch;
 
       if (settings::getSetting<bool>("verbose")) {
         cerr << "Rendering " << fragmentCount << " transparent fragments in "
              << batches << " batches" << endl;
+        if (isProblematicConfig) {
+          cerr << "Using conservative batching for problematic configuration (View=true, fxaa=false, GPUcompress=false)" << endl;
+        }
       }
 
       // Save the original data
@@ -4652,6 +4660,18 @@ void AsyVkRender::renderTransparencyStaged(FrameObject& object, int imageIndex) 
         );
 
         drawTransparent(object);
+        
+        // For problematic configurations, add a small synchronization point between batches
+        // This helps prevent GPU overload on macOS Metal/Vulkan
+        if (isProblematicConfig && batch < batches - 1) {
+          // Flush the current command buffer to ensure work is submitted
+          currentCommandBuffer.flush();
+          
+          // Small delay to allow the GPU to catch up
+          if (batch % 4 == 0) {
+            device->waitIdle();
+          }
+        }
       }
 
       transparentData.indices = originalIndices;
@@ -4764,23 +4784,45 @@ void AsyVkRender::drawFrame()
       vkutils::checkVkResult(device->resetFences(1, &*frameObject.inFlightFence));
     }
     
-    auto result = device->acquireNextImageKHR(*swapChain, timeout, *frameObject.imageAvailableSemaphore, nullptr, &imageIndex);
-    if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR || framebufferResized) {
-      framebufferResized = false;
-      recreateSwapChain();
-      return;
-    }
-    else if (result == vk::Result::eErrorOutOfDeviceMemory) {
-      outOfMemory();
-    }
-    else if (result == vk::Result::eTimeout) {
-      // Retry on timeout, but wait a bit first
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    else if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR) {
-      std::stringstream buf;
-      buf << "Error: Failed to acquire swapchain image: " << vk::to_string(result) << std::endl;
-      runtimeError(buf.str());
+    // Improved swapchain acquisition with progressive retry logic
+    vk::Result result;
+    int retryCount = 0;
+    const int maxRetries = 5;
+    const std::array<uint64_t, 5> retryTimeouts = {100000000, 250000000, 500000000, 750000000, 1000000000}; // 100ms to 1s
+    
+    while (retryCount < maxRetries) {
+      result = device->acquireNextImageKHR(
+        *swapChain, 
+        retryTimeouts[retryCount], 
+        *frameObject.imageAvailableSemaphore, 
+        nullptr, 
+        &imageIndex
+      );
+      
+      if (result == vk::Result::eSuccess || result == vk::Result::eSuboptimalKHR) {
+        break; // Acquisition successful
+      } else if (result == vk::Result::eErrorOutOfDateKHR || framebufferResized) {
+        framebufferResized = false;
+        recreateSwapChain();
+        return;
+      } else if (result == vk::Result::eErrorOutOfDeviceMemory) {
+        outOfMemory();
+      } else if (result == vk::Result::eTimeout) {
+        // Retry with progressive backoff
+        std::this_thread::sleep_for(std::chrono::milliseconds(10 * (retryCount + 1)));
+        retryCount++;
+        
+        if (retryCount >= maxRetries) {
+          std::stringstream buf;
+          buf << "Error: Failed to acquire swapchain image after " << maxRetries << " attempts: " 
+              << vk::to_string(result) << std::endl;
+          runtimeError(buf.str());
+        }
+      } else {
+        std::stringstream buf;
+        buf << "Error: Failed to acquire swapchain image: " << vk::to_string(result) << std::endl;
+        runtimeError(buf.str());
+      }
     }
   }
 
