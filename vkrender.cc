@@ -885,6 +885,8 @@ void AsyVkRender::recreateSwapChain()
     device->resetEvent(*frameObj.sumFinishedEvent);
     device->resetEvent(*frameObj.compressionFinishedEvent);
   }
+  
+  resize = false; // Reset resize flag after all resize operations are completed
 }
 
 void AsyVkRender::transitionFXAAImages()
