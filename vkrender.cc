@@ -879,6 +879,23 @@ void AsyVkRender::recreateSwapChain()
   redisplay=true;
   waitEvent=false;
   
+  // Initialize feedback buffer with default values after recreation
+  // This prevents reading garbage data when resizeFragmentBuffer is called
+  // before compute shaders have run with the new buffer sizes
+  if (feedbackMappedPtr) {
+    uint32_t* feedbackData = feedbackMappedPtr->getCopyPtr();
+    feedbackData[0] = 0; // maxDepth
+    feedbackData[1] = 0; // fragments
+    feedbackMappedPtr->flush();
+  }
+  
+  // Initialize element buffer with default values when GPUcompress is enabled
+  if (GPUcompress && elemBfMappedMem) {
+    uint32_t* elementData = elemBfMappedMem->getCopyPtr();
+    elementData[0] = 1; // Default element count
+    elemBfMappedMem->flush();
+  }
+  
   // Reset events to ensure proper synchronization after buffer recreation
   // This ensures that we wait for fresh compute shader results after resize
   for (auto& frameObj : frameObjects) {
