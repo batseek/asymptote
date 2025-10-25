@@ -825,6 +825,13 @@ void AsyVkRender::recreateSwapChain()
     frameObj.timelineValue = 0;
   }
 
+  // Recreate the timeline semaphore to ensure clean state after resize
+  // This prevents semaphore wait timeouts when View=true, Opaque=false
+  if (timelineSemaphoreSupported) {
+    renderTimelineSemaphore.reset();
+    renderTimelineSemaphore = createTimelineSemaphore(0);
+  }
+
   resetDepth=true;
 
   createSwapChain();
@@ -1863,11 +1870,14 @@ void AsyVkRender::endSingleCommands(vk::CommandBuffer cmd)
 
 void AsyVkRender::createSyncObjects()
 {
+  // Create the timeline semaphore for rendering if supported (only once, not per-frame)
+  // This fixes the semaphore timeout issue during resize when View=true, Opaque=false
+  if (!renderTimelineSemaphore) {
+    renderTimelineSemaphore = createTimelineSemaphore(0);
+  }
+
   for (auto i = 0; i < maxFramesInFlight; i++) {
     frameObjects[i].imageAvailableSemaphore = device->createSemaphoreUnique(vk::SemaphoreCreateInfo());
-
-    // Create the timeline semaphore for rendering if supported
-    renderTimelineSemaphore = createTimelineSemaphore(0);
     frameObjects[i].inCountBufferCopy = device->createSemaphoreUnique(vk::SemaphoreCreateInfo());
     frameObjects[i].inFlightFence = device->createFenceUnique(vk::FenceCreateInfo(vk::FenceCreateFlagBits::eSignaled));
     frameObjects[i].inComputeFence = device->createFenceUnique(vk::FenceCreateInfo(vk::FenceCreateFlagBits::eSignaled));
