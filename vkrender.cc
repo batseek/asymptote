@@ -823,6 +823,7 @@ void AsyVkRender::recreateSwapChain()
   currentTimelineValue = 0;
   for (auto& frameObj : frameObjects) {
     frameObj.timelineValue = 0;
+    frameObj.computeTimelineValue = 0;  // Also reset compute timeline value
   }
 
   // Recreate the timeline semaphore to ensure clean state after resize
