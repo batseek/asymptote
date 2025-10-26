@@ -887,7 +887,7 @@ void AsyVkRender::recreateSwapChain()
   }
   
   resize = false; // Reset resize flag after all resize operations are completed
-    // Set flag to call resizeFragmentBuffer after the first frame post-resize when GPUcompress is enabled
+    // For GPUcompress, we need to ensure buffers are properly updated after resize
     if (GPUcompress) {
       deferredResizeFragmentBuffer = true;
     }
