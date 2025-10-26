@@ -4483,6 +4483,17 @@ void AsyVkRender::preDrawBuffers(FrameObject & object, int imageIndex)
     object.computeCommandBuffer->reset();
 
     refreshBuffers(object, imageIndex);
+      // Wait for the compute shaders to finish executing before calling resizeFragmentBuffer
+      // This ensures that the feedback buffer contains valid data from the GPU
+      if (timelineSemaphoreSupported && object.computeTimelineValue > 0) {
+        // Use timeline semaphore for more efficient synchronization
+        waitForTimelineSemaphore(*renderTimelineSemaphore, object.computeTimelineValue, timeout);
+      } else {
+        // Fall back to fence for older hardware
+        vkutils::checkVkResult(device->waitForFences(
+          1, &*object.inComputeFence, VK_TRUE, timeout
+        ));
+      }
     // Don't call resizeFragmentBuffer immediately after resize operations
     // as the feedback buffer contains garbage data. Let normal rendering
     // proceed first to populate it with proper values from compute shaders.
