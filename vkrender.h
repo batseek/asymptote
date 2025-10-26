@@ -342,6 +342,7 @@ public:
   bool redraw=false;
   bool redisplay=false;
   bool resize=false;
+  bool deferredResizeFragmentBuffer=false;
 private:
 #ifdef HAVE_VULKAN
   struct DeviceBuffer {

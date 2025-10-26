@@ -887,6 +887,10 @@ void AsyVkRender::recreateSwapChain()
   }
   
   resize = false; // Reset resize flag after all resize operations are completed
+    // Set flag to call resizeFragmentBuffer after the first frame post-resize when GPUcompress is enabled
+    if (GPUcompress) {
+      deferredResizeFragmentBuffer = true;
+    }
 }
 
 void AsyVkRender::transitionFXAAImages()
@@ -4484,6 +4488,11 @@ void AsyVkRender::preDrawBuffers(FrameObject & object, int imageIndex)
     // proceed first to populate it with proper values from compute shaders.
     if (!resize)
       resizeFragmentBuffer(object);
+    // Handle deferred resize fragment buffer call for GPUcompress after resize
+    else if (GPUcompress && deferredResizeFragmentBuffer) {
+      resizeFragmentBuffer(object);
+      deferredResizeFragmentBuffer = false;
+    }
   }
 }
 
